@@ -1,107 +1,183 @@
 AWSTemplateFormatVersion: 2010-09-09
+
 Description: >
-  This cloudformation template prepares development environment for petclinic microservices app
-  User needs to select appropiate key name when launching the template.
+  This Cloudformation Template creates an infrastructure for Docker Swarm
+  with five EC2 Instances with Amazon Linux 2. Instances are configured
+  with custom security group allowing SSH (22), HTTP (80) UDP (4789, 7946), 
+  and TCP(2377, 7946, 8080) connections from anywhere.
+  User needs to select appropriate key name when launching the template.
+
 Parameters:
   KeyPairName:
-    Description: Enter the name of your Key Pair for SSH connection
+    Description: Enter the name of your Key Pair for SSH connections.
     Type: AWS::EC2::KeyPair::KeyName
-    ConstraintDescription: Must be one of the existing EC2 keypair
-Resources:
-  PetclinicSG:
+    ConstraintDescription: Must one of the existing EC2 KeyPair
+
+Resources:  
+  RoleEnablingEC2forECR:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+              - ec2.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryFullAccess
+  EC2Profile:
+    Type: "AWS::IAM::InstanceProfile"
+    Properties:
+      Roles: #required
+        - !Ref RoleEnablingEC2forECR
+  DockerMachinesSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: Enable HTTP and SSH for petclinic microservices
-        SecurityGroupIngress: 
-          - IpProtocol: tcp
-            FromPort: 22
-            ToPort: 22
-            CidrIp: 0.0.0.0/0
-          - IpProtocol: tcp
-            FromPort: 80
-            ToPort: 80
-            CidrIp: 0.0.0.0/0
-          - IpProtocol: tcp
-            FromPort: 8888
-            ToPort: 8888
-            CidrIp: 0.0.0.0/0
-          - IpProtocol: tcp
-            FromPort: 8761
-            ToPort: 8761
-            CidrIp: 0.0.0.0/0
-          - IpProtocol: tcp
-            FromPort: 8081
-            ToPort: 8081
-            CidrIp: 0.0.0.0/0
-          - IpProtocol: tcp
-            FromPort: 8082
-            ToPort: 8082
-            CidrIp: 0.0.0.0/0
-          - IpProtocol: tcp
-            FromPort: 8083
-            ToPort: 8083
-            CidrIp: 0.0.0.0/0
-          - IpProtocol: tcp
-            FromPort: 8080
-            ToPort: 8080
-            CidrIp: 0.0.0.0/0
-          - IpProtocol: tcp
-            FromPort: 9411
-            ToPort: 9411
-            CidrIp: 0.0.0.0/0
-          - IpProtocol: tcp
-            FromPort: 9090
-            ToPort: 9090
-            CidrIp: 0.0.0.0/0
-          - IpProtocol: tcp
-            FromPort: 7979
-            ToPort: 7979
-            CidrIp: 0.0.0.0/0
-          - IpProtocol: tcp
-            FromPort: 3000
-            ToPort: 3000
-            CidrIp: 0.0.0.0/0
-          - IpProtocol: tcp
-            FromPort: 9091
-            ToPort: 9091
-            CidrIp: 0.0.0.0/0
-  PetClinicLT:
-    Type: AWS::EC2::LaunchTemplate
+      GroupDescription: Enable SSH and HTTP for Docker Machines
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 2377
+          ToPort: 2377
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 7946
+          ToPort: 7946
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: udp
+          FromPort: 7946
+          ToPort: 7946
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: udp
+          FromPort: 4789
+          ToPort: 4789
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 8080
+          ToPort: 8080
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 8088
+          ToPort: 8088
+          CidrIp: 0.0.0.0/0
+  DockerMachineLT:
+    Type: "AWS::EC2::LaunchTemplate"
     Properties:
       LaunchTemplateData:
-        ImageId: ami-04d29b6f966df1537
+        ImageId: ami-0947d2ba12ee1ff75
         InstanceType: t2.medium
         KeyName: !Ref KeyPairName
+        IamInstanceProfile: 
+          Arn: !GetAtt EC2Profile.Arn
         SecurityGroupIds:
-          - !GetAtt PetclinicSG.GroupId
-        UserData:
-          Fn::Base64: |
-            #! /bin/bash
-            yum update -y
-            hostnamectl set-hostname petclinic-dev-server
-            amazon-linux-extras install docker -y
-            systemctl start docker
-            systemctl enable docker
-            usermod -a -G docker ec2-user
-            curl -L "https://github.com/docker/compose/releases/download/1.26.2/docker-compose-$(uname -s)-$(uname -m)" \
-            -o /usr/local/bin/docker-compose
-            chmod +x /usr/local/bin/docker-compose
-            yum install git -y
-            yum install java-11-amazon-corretto -y
-            git clone https://github.com/ramazansaribay/petclinic-microservice.git
-            cd petclinic-microservices/
-            git fetch
-            git checkout dev
-  PetClinicServer:
+          - !GetAtt DockerMachinesSecurityGroup.GroupId
+        TagSpecifications: 
+          - ResourceType: instance
+            Tags: 
+              - Key: app-stack-name
+                Value: !Sub ${AWS::StackName}
+              - Key: environment
+                Value: dev
+  DockerInstance1:
     Type: AWS::EC2::Instance
-    Properties: 
+    DependsOn:
+        - "DockerInstance2"
+    Properties:
       LaunchTemplate:
-        LaunchTemplateId: !Ref PetClinicLT
-        Version: !GetAtt PetClinicLT.LatestVersionNumber
-      Tags:
+        LaunchTemplateId: !Ref DockerMachineLT
+        Version: !GetAtt DockerMachineLT.LatestVersionNumber
+      Tags:                
+        - Key: server
+          Value: docker-instance-1                       
+        - Key: swarm-role
+          Value: grand-master                       
         - Key: Name
-          Value: !Sub Petclinic App Dev Server ${AWS::StackName}
+          Value: !Sub ${AWS::StackName} Docker Machine 1st        
+  DockerInstance2:
+    Type: AWS::EC2::Instance
+    Properties:
+      LaunchTemplate:
+        LaunchTemplateId: !Ref DockerMachineLT
+        Version: !GetAtt DockerMachineLT.LatestVersionNumber
+      Tags:                
+        - Key: server
+          Value: docker-instance-2                       
+        - Key: swarm-role
+          Value: manager                       
+        - Key: Name
+          Value: !Sub ${AWS::StackName} Docker Machine 2nd
+  DockerInstance3:
+    Type: AWS::EC2::Instance
+    Properties:
+      LaunchTemplate:
+        LaunchTemplateId: !Ref DockerMachineLT
+        Version: !GetAtt DockerMachineLT.LatestVersionNumber
+      Tags:                
+        - Key: server
+          Value: docker-instance-3                       
+        - Key: swarm-role
+          Value: manager                       
+        - Key: Name
+          Value: !Sub ${AWS::StackName} Docker Machine 3rd
+  DockerInstance4:
+    Type: AWS::EC2::Instance
+    Properties:
+      LaunchTemplate:
+        LaunchTemplateId: !Ref DockerMachineLT
+        Version: !GetAtt DockerMachineLT.LatestVersionNumber
+      Tags:                
+        - Key: server
+          Value: docker-instance-4                       
+        - Key: swarm-role
+          Value: worker                       
+        - Key: Name
+          Value: !Sub ${AWS::StackName} Docker Machine 4th
+  DockerInstance5:
+    Type: AWS::EC2::Instance
+    Properties:
+      LaunchTemplate:
+        LaunchTemplateId: !Ref DockerMachineLT
+        Version: !GetAtt DockerMachineLT.LatestVersionNumber
+      Tags:                
+        - Key: server
+          Value: docker-instance-5                       
+        - Key: swarm-role
+          Value: worker                       
+        - Key: Name
+          Value: !Sub ${AWS::StackName} Docker Machine 5th
 Outputs:
-  PetClinicDNSName:
-    Description: Petclinic App Url
-    Value: !GetAtt PetClinicServer.PublicDnsName
+  1stDockerInstanceDNSName:
+    Description: 1st Docker Instance DNS Name
+    Value: !Sub 
+      - ${PublicAddress}
+      - PublicAddress: !GetAtt DockerInstance1.PublicDnsName
+  2ndDockerInstanceDNSName:
+    Description: 2nd Docker Instance DNS Name
+    Value: !Sub 
+      - ${PublicAddress}
+      - PublicAddress: !GetAtt DockerInstance2.PublicDnsName
+  3rdDockerInstanceDNSName:
+    Description: 3rd Docker Instance DNS Name
+    Value: !Sub 
+      - ${PublicAddress}
+      - PublicAddress: !GetAtt DockerInstance3.PublicDnsName
+  4thDockerInstanceDNSName:
+    Description: 4th Docker Instance DNS Name
+    Value: !Sub 
+      - ${PublicAddress}
+      - PublicAddress: !GetAtt DockerInstance4.PublicDnsName
+  5thDockerInstanceDNSName:
+    Description: 5th Docker Instance DNS Name
+    Value: !Sub 
+      - ${PublicAddress}
+      - PublicAddress: !GetAtt DockerInstance5.PublicDnsName
+  
